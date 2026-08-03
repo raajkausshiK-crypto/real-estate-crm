@@ -1,14 +1,72 @@
-import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const isVercel = !!process.env.VERCEL;
-const dbPath = isVercel ? '/tmp/data.db' : path.join(__dirname, '..', '..', 'data.db');
-const db = new Database(dbPath);
+
+interface StmtResult { changes: number; lastInsertRowid: number | bigint; }
+interface PreparedLike {
+  get(...params: any[]): any;
+  all(...params: any[]): any[];
+  run(...params: any[]): StmtResult;
+}
+interface DbLike {
+  prepare(sql: string): PreparedLike;
+  exec(sql: string): void;
+  pragma(p: string): void;
+}
+
+let db: DbLike;
+
+if (isVercel) {
+  const initSqlJs = (await import('sql.js')).default;
+  const SQL = await initSqlJs();
+  const raw = new SQL.Database();
+
+  function rowObj(stmt: any): any {
+    const cols = stmt.getColumnNames();
+    const vals = stmt.get();
+    const row: any = {};
+    for (let i = 0; i < cols.length; i++) row[cols[i]] = vals[i];
+    return row;
+  }
+
+  db = {
+    prepare(sql: string): PreparedLike {
+      return {
+        get(...params: any[]) {
+          const stmt = raw.prepare(sql);
+          if (params.length) stmt.bind(params);
+          if (stmt.step()) { const r = rowObj(stmt); stmt.free(); return r; }
+          stmt.free();
+          return undefined;
+        },
+        all(...params: any[]) {
+          const results: any[] = [];
+          const stmt = raw.prepare(sql);
+          if (params.length) stmt.bind(params);
+          while (stmt.step()) results.push(rowObj(stmt));
+          stmt.free();
+          return results;
+        },
+        run(...params: any[]) {
+          raw.run(sql, params);
+          const rid = raw.exec("SELECT last_insert_rowid()");
+          const lastId = rid.length && rid[0].values.length ? rid[0].values[0][0] : 0;
+          return { changes: raw.getRowsModified(), lastInsertRowid: lastId as number };
+        }
+      };
+    },
+    exec(sql: string) { raw.exec(sql); },
+    pragma(p: string) { try { raw.exec(`PRAGMA ${p}`); } catch {} }
+  };
+} else {
+  const Database = (await import('better-sqlite3')).default;
+  const dbPath = path.join(__dirname, '..', '..', 'data.db');
+  db = new Database(dbPath) as any;
+}
 
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -45,7 +103,7 @@ export function initDb() {
   if (!has('followup_date')) db.exec("ALTER TABLE leads ADD COLUMN followup_date TEXT");
   if (!has('followup_time')) db.exec("ALTER TABLE leads ADD COLUMN followup_time TEXT");
 
-  console.log('Database initialized at', dbPath);
+  console.log('Database initialized (vercel:', isVercel, ')');
 }
 
 export default db;
