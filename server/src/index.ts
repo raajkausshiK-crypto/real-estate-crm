@@ -10,6 +10,7 @@ import csvRoutes from './routes/csv';
 import integrationRoutes from './routes/integrations';
 import webhookRoutes from './routes/webhooks';
 import callRoutes from './routes/calls';
+import employeeRoutes from './routes/employees';
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ app.use('/api/csv', csvRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/calls', callRoutes);
+app.use('/api/employees', employeeRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

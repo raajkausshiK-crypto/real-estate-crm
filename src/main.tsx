@@ -13,6 +13,7 @@ import Properties from './pages/Properties';
 import ImportExport from './pages/ImportExport';
 import Integrations from './pages/Integrations';
 import Calls from './pages/Calls';
+import Employees from './pages/Employees';
 import './index.css';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -36,6 +37,7 @@ function App() {
             <Route path="import-export" element={<ImportExport />} />
             <Route path="integrations" element={<Integrations />} />
             <Route path="calls" element={<Calls />} />
+            <Route path="employees" element={<Employees />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -123,3 +123,19 @@ CREATE TABLE IF NOT EXISTS call_logs (
 
 CREATE INDEX IF NOT EXISTS idx_call_logs_user ON call_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_call_logs_contact ON call_logs(contact_id);
+
+CREATE TABLE IF NOT EXISTS employees (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  role TEXT DEFAULT 'Agent',
+  avatar_color TEXT DEFAULT '#6366f1',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_employees_created_by ON employees(created_by);
+
+-- Add assigned_to column to leads if it doesn't exist
+-- SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we handle this in code

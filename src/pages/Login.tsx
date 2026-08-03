@@ -29,7 +29,7 @@ export default function Login() {
         <div className="auth-logo">
           <div className="logo-icon">🏢</div>
           <h1>Welcome Back</h1>
-          <p className="auth-subtitle">Sign in to your Real Estate CRM</p>
+          <p className="auth-subtitle">Sign in to your PropertyInsta CRM</p>
         </div>
         {error && <div className="error-msg">{error}</div>}
         <form onSubmit={handleSubmit}>

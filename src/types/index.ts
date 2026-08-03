@@ -43,11 +43,41 @@ export interface Lead {
   status: 'Hot' | 'Warm' | 'Cold' | 'Closed' | 'Follow-up Needed';
   source: string;
   notes: string;
+  assigned_to: number | null;
+  assigned_name: string | null;
+  assigned_color: string | null;
+  budget: string | null;
+  project_lead_for: string | null;
+  suggested_projects: string | null;
+  location_looking: string | null;
+  remarks: string | null;
+  next_call_date: string | null;
+  next_call_time: string | null;
+  site_visit_plan: string | null;
+  site_visit_date: string | null;
+  lead_assign_date: string | null;
+  assigned_by: string | null;
+  buyer_purpose: string | null;
+  final_meeting_date: string | null;
+  final_meeting_notes: string | null;
+  pattern: string | null;
+  followup_date: string | null;
+  followup_time: string | null;
   contact_name: string;
   contact_email: string;
   contact_phone: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface Employee {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  role: string;
+  avatar_color: string;
+  created_at: string;
 }
 
 export interface PropertyInterest {

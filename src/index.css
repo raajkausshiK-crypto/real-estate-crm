@@ -166,6 +166,30 @@ td strong { color: var(--text); font-weight: 550; }
 .badge-success { background: var(--success-light); color: var(--success); }
 .badge-active { background: var(--primary-light); color: var(--primary); }
 
+.status-pills { display: flex; gap: 4px; flex-wrap: wrap; }
+.badge-muted { opacity: 0.35; filter: grayscale(0.6); }
+.badge-muted:hover { opacity: 0.7; filter: none; }
+
+.emp-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+.emp-avatar-sm { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 9px; font-weight: 600; flex-shrink: 0; }
+.assign-select { font-size: 13px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; min-width: 120px; }
+
+/* ── Lead Detail ── */
+.lead-detail-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+.lead-detail-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.lead-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin-bottom: 20px; }
+.lead-detail-item { display: flex; flex-direction: column; gap: 2px; }
+.lead-detail-item label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+.lead-detail-item span { font-size: 14px; font-weight: 500; }
+.lead-detail-section { margin-bottom: 14px; }
+.lead-detail-section label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+.lead-detail-section p { font-size: 14px; margin: 0; background: var(--bg-secondary); padding: 10px 14px; border-radius: 8px; }
+
+/* ── Lead Form ── */
+.lead-form { max-height: 65vh; overflow-y: auto; }
+.lead-fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.lead-fieldset legend { font-size: 13px; font-weight: 700; color: var(--primary); padding: 0 8px; }
+
 /* ── Search Bar ── */
 .search-bar { display: flex; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
 .search-bar input { max-width: 340px; }
