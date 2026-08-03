@@ -6,14 +6,22 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = path.join(__dirname, '..', '..', 'data.db');
+const isVercel = !!process.env.VERCEL;
+const dbPath = isVercel ? '/tmp/data.db' : path.join(__dirname, '..', '..', 'data.db');
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 export function initDb() {
-  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf-8');
+  let schema: string;
+  const schemaPath = path.join(__dirname, 'schema.sql');
+  if (fs.existsSync(schemaPath)) {
+    schema = fs.readFileSync(schemaPath, 'utf-8');
+  } else {
+    const altPath = path.join(process.cwd(), 'server', 'src', 'config', 'schema.sql');
+    schema = fs.readFileSync(altPath, 'utf-8');
+  }
   db.exec(schema);
 
   const cols = db.prepare("PRAGMA table_info(leads)").all() as any[];
