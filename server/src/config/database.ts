@@ -19,12 +19,9 @@ interface DbLike {
 }
 
 let db: DbLike;
+let _initPromise: Promise<void> | null = null;
 
-if (isVercel) {
-  const initSqlJs = (await import('sql.js')).default;
-  const SQL = await initSqlJs();
-  const raw = new SQL.Database();
-
+function makeSqlJsWrapper(raw: any): DbLike {
   function rowObj(stmt: any): any {
     const cols = stmt.getColumnNames();
     const vals = stmt.get();
@@ -32,8 +29,7 @@ if (isVercel) {
     for (let i = 0; i < cols.length; i++) row[cols[i]] = vals[i];
     return row;
   }
-
-  db = {
+  return {
     prepare(sql: string): PreparedLike {
       return {
         get(...params: any[]) {
@@ -62,16 +58,23 @@ if (isVercel) {
     exec(sql: string) { raw.exec(sql); },
     pragma(p: string) { try { raw.exec(`PRAGMA ${p}`); } catch {} }
   };
-} else {
-  const Database = (await import('better-sqlite3')).default;
-  const dbPath = path.join(__dirname, '..', '..', 'data.db');
-  db = new Database(dbPath) as any;
 }
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+async function initDbInternal() {
+  if (isVercel) {
+    const initSqlJs = (await import('sql.js')).default;
+    const SQL = await initSqlJs();
+    const raw = new SQL.Database();
+    db = makeSqlJsWrapper(raw);
+  } else {
+    const Database = (await import('better-sqlite3')).default;
+    const dbPath = path.join(__dirname, '..', '..', 'data.db');
+    db = new Database(dbPath) as any;
+  }
 
-export function initDb() {
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+
   let schema: string;
   const schemaPath = path.join(__dirname, 'schema.sql');
   if (fs.existsSync(schemaPath)) {
@@ -106,4 +109,19 @@ export function initDb() {
   console.log('Database initialized (vercel:', isVercel, ')');
 }
 
-export default db;
+export async function initDb() {
+  if (!_initPromise) _initPromise = initDbInternal();
+  return _initPromise;
+}
+
+export function getDb(): DbLike {
+  if (!db) throw new Error('Database not initialized — call initDb() first');
+  return db;
+}
+
+export default new Proxy({} as DbLike, {
+  get(_target, prop) {
+    if (!db) throw new Error('Database not initialized — call initDb() first');
+    return (db as any)[prop];
+  }
+});
