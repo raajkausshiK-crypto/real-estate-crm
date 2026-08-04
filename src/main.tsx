@@ -27,7 +27,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
           <h2>Something went wrong</h2>
           <p style={{ color: '#666', margin: '12px 0' }}>This page encountered an error.</p>
           <button onClick={() => { this.setState({ hasError: false }); window.location.reload(); }}
-            style={{ padding: '10px 24px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15 }}>
+            style={{ padding: '10px 24px', background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15, boxShadow: '0 4px 14px rgba(37,99,235,0.3)' }}>
             Reload Page
           </button>
         </div>
