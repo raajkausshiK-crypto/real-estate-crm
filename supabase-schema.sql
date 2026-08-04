@@ -1,4 +1,4 @@
--- PropertyInsta CRM — Supabase Schema
+-- Real Estate CRM — Supabase Schema
 -- Paste this into Supabase SQL Editor (https://supabase.com/dashboard → SQL Editor → New query)
 
 -- Users
