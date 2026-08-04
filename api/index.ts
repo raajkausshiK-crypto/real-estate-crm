@@ -161,12 +161,13 @@ app.delete('/api/leads/:id', auth, async (req: any, res) => {
 // ── Contacts ──
 app.get('/api/contacts', auth, async (req: any, res) => {
   try {
-    const { search } = req.query;
-    let query = supabase.from('contacts').select('*').eq('created_by', req.userId).order('updated_at', { ascending: false });
+    const { search, limit } = req.query;
+    let query = supabase.from('contacts').select('*', { count: 'exact' }).eq('created_by', req.userId).order('updated_at', { ascending: false });
     if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
-    const { data, error } = await query;
+    if (limit) query = query.limit(Number(limit));
+    const { data, count, error } = await query;
     if (error) throw error;
-    res.json(data);
+    res.json({ contacts: data || [], total: count || 0 });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
@@ -209,12 +210,13 @@ app.delete('/api/contacts/:id', auth, async (req: any, res) => {
 // ── Properties ──
 app.get('/api/properties', auth, async (req: any, res) => {
   try {
-    const { search } = req.query;
-    let query = supabase.from('properties').select('*').eq('created_by', req.userId).order('updated_at', { ascending: false });
+    const { search, limit } = req.query;
+    let query = supabase.from('properties').select('*', { count: 'exact' }).eq('created_by', req.userId).order('updated_at', { ascending: false });
     if (search) query = query.or(`address.ilike.%${search}%,city.ilike.%${search}%`);
-    const { data, error } = await query;
+    if (limit) query = query.limit(Number(limit));
+    const { data, count, error } = await query;
     if (error) throw error;
-    res.json(data);
+    res.json({ properties: data || [], total: count || 0 });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
@@ -260,7 +262,7 @@ app.get('/api/employees', auth, async (req: any, res) => {
   try {
     const { data, error } = await supabase.from('employees').select('*').eq('created_by', req.userId).order('name');
     if (error) throw error;
-    res.json(data);
+    res.json({ employees: data || [] });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
@@ -305,21 +307,31 @@ app.get('/api/integrations', auth, async (req: any, res) => {
   try {
     const { data, error } = await supabase.from('integrations').select('*').eq('user_id', req.userId);
     if (error) throw error;
-    res.json(data);
+    const meta = (data || []).find((i: any) => i.platform === 'meta') || null;
+    const google = (data || []).find((i: any) => i.platform === 'google') || null;
+    res.json({ meta, google });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
 // ── Calls ──
-app.get('/api/calls', auth, async (req: any, res) => {
+app.get('/api/calls/logs', auth, async (req: any, res) => {
   try {
-    const { data, error } = await supabase.from('call_logs').select(`
+    const { data, count, error } = await supabase.from('call_logs').select(`
       *, contacts!call_logs_contact_id_fkey(name, phone)
-    `).eq('user_id', req.userId).order('created_at', { ascending: false }).limit(50);
+    `, { count: 'exact' }).eq('user_id', req.userId).order('created_at', { ascending: false }).limit(50);
     if (error) throw error;
     const mapped = (data || []).map((c: any) => ({
       ...c, contact_name: c.contacts?.name, contact_phone: c.contacts?.phone, contacts: undefined
     }));
-    res.json(mapped);
+    res.json({ logs: mapped, total: count || 0 });
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
+app.get('/api/calls/settings', auth, async (req: any, res) => {
+  try {
+    const { data, error } = await supabase.from('twilio_settings').select('*').eq('user_id', req.userId).single();
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json({ settings: data || null });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
