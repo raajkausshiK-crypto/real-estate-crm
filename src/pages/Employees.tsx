@@ -13,7 +13,7 @@ export default function Employees() {
   const [search, setSearch] = useState('');
 
   const fetchEmployees = () => {
-    api.get<{ employees: Employee[] }>('/employees').then(d => setEmployees(d.employees));
+    api.get<{ employees: Employee[] }>('/employees').then(d => setEmployees(d?.employees || [])).catch(() => {});
   };
 
   useEffect(() => { fetchEmployees(); }, []);

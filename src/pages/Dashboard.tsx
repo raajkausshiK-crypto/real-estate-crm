@@ -17,8 +17,8 @@ export default function Dashboard() {
       api.get<{ total: number }>('/leads?status=Hot&limit=1'),
       api.get<{ leads: Lead[] }>('/leads?limit=5'),
     ]).then(([l, c, p, h, recent]) => {
-      setStats({ leads: l.total, contacts: c.total, properties: p.total, hot: h.total });
-      setRecentLeads(recent.leads);
+      setStats({ leads: l?.total || 0, contacts: c?.total || 0, properties: p?.total || 0, hot: h?.total || 0 });
+      setRecentLeads(recent?.leads || []);
     }).catch(() => {});
   }, []);
 

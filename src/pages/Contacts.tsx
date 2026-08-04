@@ -16,9 +16,9 @@ export default function Contacts() {
   const fetchContacts = () => {
     const params = search ? `?search=${encodeURIComponent(search)}` : '';
     api.get<{ contacts: Contact[]; total: number }>(`/contacts${params}`).then(d => {
-      setContacts(d.contacts);
-      setTotal(d.total);
-    });
+      setContacts(d?.contacts || []);
+      setTotal(d?.total || 0);
+    }).catch(() => {});
   };
 
   useEffect(() => { fetchContacts(); }, [search]);

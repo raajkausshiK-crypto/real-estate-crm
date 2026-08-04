@@ -40,23 +40,23 @@ export default function Leads() {
     if (search) params.set('search', search);
     if (statusFilter) params.set('status', statusFilter);
     api.get<{ leads: Lead[]; total: number }>(`/leads?${params}`).then(d => {
-      setLeads(d.leads);
-      setTotal(d.total);
-    });
+      setLeads(d?.leads || []);
+      setTotal(d?.total || 0);
+    }).catch(() => {});
   };
 
   useEffect(() => { fetchLeads(); }, [search, statusFilter]);
-  useEffect(() => { api.get<{ employees: Employee[] }>('/employees').then(d => setEmployees(d.employees)).catch(() => {}); }, []);
+  useEffect(() => { api.get<{ employees: Employee[] }>('/employees').then(d => setEmployees(d?.employees || [])).catch(() => {}); }, []);
 
   const openAdd = () => {
-    api.get<{ contacts: Contact[] }>('/contacts?limit=200').then(d => setContacts(d.contacts));
+    api.get<{ contacts: Contact[] }>('/contacts?limit=200').then(d => setContacts(d?.contacts || [])).catch(() => {});
     setForm({ ...EMPTY_FORM });
     setEditingId(null);
     setShowAdd(true);
   };
 
   const openEdit = (lead: Lead) => {
-    api.get<{ contacts: Contact[] }>('/contacts?limit=200').then(d => setContacts(d.contacts));
+    api.get<{ contacts: Contact[] }>('/contacts?limit=200').then(d => setContacts(d?.contacts || [])).catch(() => {});
     setForm({
       contact_id: String(lead.contact_id), status: lead.status, source: lead.source || '',
       notes: lead.notes || '', assigned_to: lead.assigned_to ? String(lead.assigned_to) : '',

@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -16,7 +16,28 @@ import Calls from './pages/Calls';
 import Employees from './pages/Employees';
 import './index.css';
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error('Page error:', error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, textAlign: 'center' }}>
+          <h2>Something went wrong</h2>
+          <p style={{ color: '#666', margin: '12px 0' }}>This page encountered an error.</p>
+          <button onClick={() => { this.setState({ hasError: false }); window.location.reload(); }}
+            style={{ padding: '10px 24px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15 }}>
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function ProtectedRoute({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   return token ? <>{children}</> : <Navigate to="/login" />;
 }
@@ -29,15 +50,15 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route index element={<Dashboard />} />
-            <Route path="leads" element={<Leads />} />
-            <Route path="pipeline" element={<Pipeline />} />
-            <Route path="contacts" element={<Contacts />} />
-            <Route path="properties" element={<Properties />} />
-            <Route path="import-export" element={<ImportExport />} />
-            <Route path="integrations" element={<Integrations />} />
-            <Route path="calls" element={<Calls />} />
-            <Route path="employees" element={<Employees />} />
+            <Route index element={<ErrorBoundary><Dashboard /></ErrorBoundary>} />
+            <Route path="leads" element={<ErrorBoundary><Leads /></ErrorBoundary>} />
+            <Route path="pipeline" element={<ErrorBoundary><Pipeline /></ErrorBoundary>} />
+            <Route path="contacts" element={<ErrorBoundary><Contacts /></ErrorBoundary>} />
+            <Route path="properties" element={<ErrorBoundary><Properties /></ErrorBoundary>} />
+            <Route path="import-export" element={<ErrorBoundary><ImportExport /></ErrorBoundary>} />
+            <Route path="integrations" element={<ErrorBoundary><Integrations /></ErrorBoundary>} />
+            <Route path="calls" element={<ErrorBoundary><Calls /></ErrorBoundary>} />
+            <Route path="employees" element={<ErrorBoundary><Employees /></ErrorBoundary>} />
           </Route>
         </Routes>
       </BrowserRouter>

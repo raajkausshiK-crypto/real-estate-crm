@@ -16,8 +16,8 @@ export default function Properties() {
   const fetchProperties = () => {
     const params = search ? `?search=${encodeURIComponent(search)}` : '';
     api.get<{ properties: Property[]; total: number }>(`/properties${params}`).then(d => {
-      setProperties(d.properties); setTotal(d.total);
-    });
+      setProperties(d?.properties || []); setTotal(d?.total || 0);
+    }).catch(() => {});
   };
 
   useEffect(() => { fetchProperties(); }, [search]);
