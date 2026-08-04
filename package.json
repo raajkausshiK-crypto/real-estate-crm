@@ -10,6 +10,7 @@
     "server": "tsx server/src/index.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.0",
     "@twilio/voice-sdk": "^2.18.3",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.6.0",
