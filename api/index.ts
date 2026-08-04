@@ -61,7 +61,7 @@ app.get('/api/leads', auth, async (req: any, res) => {
     let query = supabase.from('leads').select(`
       *, contacts!leads_contact_id_fkey(name, email, phone),
       employees!leads_assigned_to_fkey(name, avatar_color)
-    `, { count: 'exact' }).eq('created_by', req.userId).order('updated_at', { ascending: false }).range(offset, offset + Number(limit) - 1);
+    `, { count: 'exact' }).order('updated_at', { ascending: false }).range(offset, offset + Number(limit) - 1);
     if (status) query = query.eq('status', status);
     const { data: leads, count, error } = await query;
     if (error) throw error;
@@ -84,7 +84,7 @@ app.get('/api/leads/pipeline', auth, async (req: any, res) => {
     const { data: leads, error } = await supabase.from('leads').select(`
       *, contacts!leads_contact_id_fkey(name, email, phone),
       employees!leads_assigned_to_fkey(name, avatar_color)
-    `).eq('created_by', req.userId).order('updated_at', { ascending: false });
+    `).order('updated_at', { ascending: false });
     if (error) throw error;
     const pipeline: Record<string, any[]> = { 'Hot': [], 'Warm': [], 'Cold': [], 'Follow-up Needed': [], 'Closed': [] };
     for (const l of leads || []) {
@@ -99,7 +99,7 @@ app.get('/api/leads/:id', auth, async (req: any, res) => {
   try {
     const { data: lead, error } = await supabase.from('leads').select(`
       *, contacts!leads_contact_id_fkey(name, email, phone)
-    `).eq('id', req.params.id).eq('created_by', req.userId).single();
+    `).eq('id', req.params.id).single();
     if (error || !lead) return res.status(404).json({ error: 'Lead not found' });
     res.json({ ...lead, contact_name: lead.contacts?.name, contact_email: lead.contacts?.email, contact_phone: lead.contacts?.phone, contacts: undefined });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
@@ -130,7 +130,7 @@ app.post('/api/leads', auth, async (req: any, res) => {
 app.put('/api/leads/:id', auth, async (req: any, res) => {
   try {
     const b = req.body;
-    const { data: existing, error: fetchErr } = await supabase.from('leads').select('*').eq('id', req.params.id).eq('created_by', req.userId).single();
+    const { data: existing, error: fetchErr } = await supabase.from('leads').select('*').eq('id', req.params.id).single();
     if (fetchErr || !existing) return res.status(404).json({ error: 'Lead not found' });
     const v = (key: string) => b[key] !== undefined ? (b[key] || null) : existing[key];
     const { data, error } = await supabase.from('leads').update({
@@ -143,7 +143,7 @@ app.put('/api/leads/:id', auth, async (req: any, res) => {
       final_meeting_date: v('final_meeting_date'), final_meeting_notes: v('final_meeting_notes'),
       pattern: v('pattern'), followup_date: v('followup_date'), followup_time: v('followup_time'),
       updated_at: new Date().toISOString()
-    }).eq('id', req.params.id).eq('created_by', req.userId).select().single();
+    }).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
@@ -151,7 +151,7 @@ app.put('/api/leads/:id', auth, async (req: any, res) => {
 
 app.delete('/api/leads/:id', auth, async (req: any, res) => {
   try {
-    const { data, error } = await supabase.from('leads').delete().eq('id', req.params.id).eq('created_by', req.userId).select();
+    const { data, error } = await supabase.from('leads').delete().eq('id', req.params.id).select();
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Lead not found' });
     res.json({ message: 'Lead deleted' });
@@ -162,7 +162,7 @@ app.delete('/api/leads/:id', auth, async (req: any, res) => {
 app.get('/api/contacts', auth, async (req: any, res) => {
   try {
     const { search, limit } = req.query;
-    let query = supabase.from('contacts').select('*', { count: 'exact' }).eq('created_by', req.userId).order('updated_at', { ascending: false });
+    let query = supabase.from('contacts').select('*', { count: 'exact' }).order('updated_at', { ascending: false });
     if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
     if (limit) query = query.limit(Number(limit));
     const { data, count, error } = await query;
@@ -192,7 +192,7 @@ app.put('/api/contacts/:id', auth, async (req: any, res) => {
       name: b.name, email: b.email || null, phone: b.phone || null, address: b.address || null,
       city: b.city || null, state: b.state || null, zip: b.zip || null, notes: b.notes || null,
       updated_at: new Date().toISOString()
-    }).eq('id', req.params.id).eq('created_by', req.userId).select().single();
+    }).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
@@ -200,7 +200,7 @@ app.put('/api/contacts/:id', auth, async (req: any, res) => {
 
 app.delete('/api/contacts/:id', auth, async (req: any, res) => {
   try {
-    const { data, error } = await supabase.from('contacts').delete().eq('id', req.params.id).eq('created_by', req.userId).select();
+    const { data, error } = await supabase.from('contacts').delete().eq('id', req.params.id).select();
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Contact not found' });
     res.json({ message: 'Contact deleted' });
@@ -211,7 +211,7 @@ app.delete('/api/contacts/:id', auth, async (req: any, res) => {
 app.get('/api/properties', auth, async (req: any, res) => {
   try {
     const { search, limit } = req.query;
-    let query = supabase.from('properties').select('*', { count: 'exact' }).eq('created_by', req.userId).order('updated_at', { ascending: false });
+    let query = supabase.from('properties').select('*', { count: 'exact' }).order('updated_at', { ascending: false });
     if (search) query = query.or(`address.ilike.%${search}%,city.ilike.%${search}%`);
     if (limit) query = query.limit(Number(limit));
     const { data, count, error } = await query;
@@ -242,7 +242,7 @@ app.put('/api/properties/:id', auth, async (req: any, res) => {
       price: b.price || null, bedrooms: b.bedrooms || null, bathrooms: b.bathrooms || null,
       sqft: b.sqft || null, photo_url: b.photo_url || null, status: b.status || 'Active',
       description: b.description || null, updated_at: new Date().toISOString()
-    }).eq('id', req.params.id).eq('created_by', req.userId).select().single();
+    }).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
@@ -250,7 +250,7 @@ app.put('/api/properties/:id', auth, async (req: any, res) => {
 
 app.delete('/api/properties/:id', auth, async (req: any, res) => {
   try {
-    const { data, error } = await supabase.from('properties').delete().eq('id', req.params.id).eq('created_by', req.userId).select();
+    const { data, error } = await supabase.from('properties').delete().eq('id', req.params.id).select();
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Not found' });
     res.json({ message: 'Property deleted' });
@@ -260,7 +260,7 @@ app.delete('/api/properties/:id', auth, async (req: any, res) => {
 // ── Employees ──
 app.get('/api/employees', auth, async (req: any, res) => {
   try {
-    const { data, error } = await supabase.from('employees').select('*').eq('created_by', req.userId).order('name');
+    const { data, error } = await supabase.from('employees').select('*').order('name');
     if (error) throw error;
     res.json({ employees: data || [] });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
@@ -270,7 +270,7 @@ app.post('/api/employees', auth, async (req: any, res) => {
   try {
     const { name, email, phone, role } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
-    const colors = ['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#3b82f6','#ef4444','#14b8a6'];
+    const colors = ['#0284c7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626','#0d9488'];
     const color = colors[Math.floor(Math.random() * colors.length)];
     const { data, error } = await supabase.from('employees').insert({
       name, email: email || null, phone: phone || null, role: role || 'Agent',
@@ -286,7 +286,7 @@ app.put('/api/employees/:id', auth, async (req: any, res) => {
     const { name, email, phone, role } = req.body;
     const { data, error } = await supabase.from('employees').update({
       name, email: email || null, phone: phone || null, role: role || 'Agent'
-    }).eq('id', req.params.id).eq('created_by', req.userId).select().single();
+    }).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
@@ -295,7 +295,7 @@ app.put('/api/employees/:id', auth, async (req: any, res) => {
 app.delete('/api/employees/:id', auth, async (req: any, res) => {
   try {
     await supabase.from('leads').update({ assigned_to: null }).eq('assigned_to', req.params.id);
-    const { data, error } = await supabase.from('employees').delete().eq('id', req.params.id).eq('created_by', req.userId).select();
+    const { data, error } = await supabase.from('employees').delete().eq('id', req.params.id).select();
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Not found' });
     res.json({ message: 'Employee deleted' });
