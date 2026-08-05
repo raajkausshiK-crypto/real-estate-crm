@@ -1,9 +1,12 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../utils/api';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '📊', end: true },
   { to: '/leads', label: 'Leads', icon: '🎯' },
+  { to: '/followups', label: 'Follow-ups', icon: '🔔', badge: true },
   { to: '/pipeline', label: 'Pipeline', icon: '📋' },
   { to: '/contacts', label: 'Contacts', icon: '👥' },
   { to: '/properties', label: 'Properties', icon: '🏠' },
@@ -16,6 +19,17 @@ const NAV_ITEMS = [
 export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [fuCount, setFuCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const load = () => api.get<{ followups: { overdue: number; today: number } }>('/analytics')
+      .then(d => { if (active) setFuCount((d?.followups?.overdue || 0) + (d?.followups?.today || 0)); })
+      .catch(() => {});
+    load();
+    const id = setInterval(load, 60000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -41,6 +55,7 @@ export default function Layout() {
             >
               <span className="icon">{item.icon}</span>
               {item.label}
+              {item.badge && fuCount > 0 && <span className="nav-badge">{fuCount}</span>}
             </NavLink>
           ))}
         </nav>

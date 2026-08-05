@@ -409,6 +409,135 @@ app.get('/api/calls/settings', auth, async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
+// ── Analytics ──
+app.get('/api/analytics', auth, async (req: any, res) => {
+  try {
+    const { role, employeeId } = await getRoleForUser(req.userId);
+    let leadQuery = supabase.from('leads').select(`
+      *, employees!leads_assigned_to_fkey(name, avatar_color)
+    `);
+    if (role === 'employee') leadQuery = leadQuery.eq('assigned_to', employeeId);
+    const { data: leads, error } = await leadQuery;
+    if (error) throw error;
+    const L = leads || [];
+
+    const [{ count: contactsCount }, { count: propertiesCount }, { count: employeesCount }] = await Promise.all([
+      supabase.from('contacts').select('*', { count: 'exact', head: true }),
+      supabase.from('properties').select('*', { count: 'exact', head: true }),
+      supabase.from('employees').select('*', { count: 'exact', head: true }),
+    ]);
+
+    const tally = (key: string) => {
+      const out: Record<string, number> = {};
+      for (const l of L) { const v = l[key] || 'Unknown'; out[v] = (out[v] || 0) + 1; }
+      return out;
+    };
+
+    const byStatus = { Hot: 0, Warm: 0, Cold: 0, 'Follow-up Needed': 0, Closed: 0 } as Record<string, number>;
+    for (const l of L) if (byStatus[l.status] !== undefined) byStatus[l.status]++;
+
+    // Agent leaderboard
+    const agents: Record<string, { name: string; color: string; total: number; closed: number }> = {};
+    for (const l of L) {
+      if (!l.assigned_to) continue;
+      const name = l.employees?.name || 'Unknown';
+      const color = l.employees?.avatar_color || '#64748b';
+      const key = String(l.assigned_to);
+      if (!agents[key]) agents[key] = { name, color, total: 0, closed: 0 };
+      agents[key].total++;
+      if (l.status === 'Closed') agents[key].closed++;
+    }
+    const agentLeaderboard = Object.values(agents).sort((a, b) => b.total - a.total);
+
+    // 6-month trend by created_at
+    const trend: { month: string; count: number }[] = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const label = d.toLocaleString('en-US', { month: 'short' });
+      const yr = d.getFullYear(), mo = d.getMonth();
+      const count = L.filter(l => { const c = l.created_at ? new Date(l.created_at) : null; return c && c.getFullYear() === yr && c.getMonth() === mo; }).length;
+      trend.push({ month: label, count });
+    }
+
+    // Follow-up buckets from existing date fields
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+    const dateFields = ['followup_date', 'next_call_date', 'site_visit_date', 'final_meeting_date'];
+    let overdue = 0, dueToday = 0, dueWeek = 0;
+    for (const l of L) {
+      if (l.status === 'Closed') continue;
+      for (const f of dateFields) {
+        if (!l[f]) continue;
+        const d = new Date(l[f]); if (isNaN(d.getTime())) continue; d.setHours(0, 0, 0, 0);
+        if (d < today) overdue++;
+        else if (d.getTime() === today.getTime()) dueToday++;
+        else if (d <= weekEnd) dueWeek++;
+      }
+    }
+
+    const total = L.length;
+    const closed = byStatus.Closed;
+    const conversionRate = total ? Math.round((closed / total) * 100) : 0;
+
+    res.json({
+      totals: { leads: total, contacts: contactsCount || 0, properties: propertiesCount || 0, employees: employeesCount || 0, hot: byStatus.Hot, closed },
+      conversionRate,
+      byStatus,
+      bySource: tally('source'),
+      byPurpose: tally('buyer_purpose'),
+      byPattern: tally('pattern'),
+      agentLeaderboard,
+      trend,
+      followups: { overdue, today: dueToday, week: dueWeek },
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
+// ── Follow-ups (derived from lead date fields) ──
+app.get('/api/followups', auth, async (req: any, res) => {
+  try {
+    const { role, employeeId } = await getRoleForUser(req.userId);
+    let query = supabase.from('leads').select(`
+      *, contacts!leads_contact_id_fkey(name, email, phone),
+      employees!leads_assigned_to_fkey(name, avatar_color)
+    `);
+    if (role === 'employee') query = query.eq('assigned_to', employeeId);
+    const { data: leads, error } = await query;
+    if (error) throw error;
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const fieldMeta: { field: string; type: string }[] = [
+      { field: 'followup_date', type: 'Follow-up' },
+      { field: 'next_call_date', type: 'Call' },
+      { field: 'site_visit_date', type: 'Site Visit' },
+      { field: 'final_meeting_date', type: 'Final Meeting' },
+    ];
+    const items: any[] = [];
+    for (const l of leads || []) {
+      if (l.status === 'Closed') continue;
+      for (const { field, type } of fieldMeta) {
+        if (!l[field]) continue;
+        const d = new Date(l[field]); if (isNaN(d.getTime())) continue;
+        const day = new Date(d); day.setHours(0, 0, 0, 0);
+        const diff = Math.round((day.getTime() - today.getTime()) / 86400000);
+        let bucket = 'upcoming';
+        if (diff < 0) bucket = 'overdue';
+        else if (diff === 0) bucket = 'today';
+        else if (diff <= 7) bucket = 'week';
+        const time = field === 'followup_date' ? l.followup_time : field === 'next_call_date' ? l.next_call_time : null;
+        items.push({
+          lead_id: l.id, contact_name: l.contacts?.name, contact_phone: l.contacts?.phone,
+          contact_id: l.contact_id, status: l.status, type, date: l[field], time: time || null,
+          assigned_name: l.employees?.name, assigned_color: l.employees?.avatar_color, bucket, diff,
+        });
+      }
+    }
+    items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    res.json({ items });
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
 // ── Health ──
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', db: 'supabase', timestamp: new Date().toISOString() });

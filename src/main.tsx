@@ -6,6 +6,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Leads from './pages/Leads';
+import Followups from './pages/Followups';
 import Pipeline from './pages/Pipeline';
 import Contacts from './pages/Contacts';
 import Properties from './pages/Properties';
@@ -56,6 +57,7 @@ function App() {
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<ErrorBoundary><Dashboard /></ErrorBoundary>} />
             <Route path="leads" element={<ErrorBoundary><Leads /></ErrorBoundary>} />
+            <Route path="followups" element={<ErrorBoundary><Followups /></ErrorBoundary>} />
             <Route path="pipeline" element={<ErrorBoundary><Pipeline /></ErrorBoundary>} />
             <Route path="contacts" element={<ErrorBoundary><Contacts /></ErrorBoundary>} />
             <Route path="properties" element={<ErrorBoundary><Properties /></ErrorBoundary>} />
