@@ -40,9 +40,11 @@ async function getRoleForUser(userId: number): Promise<{ role: 'admin' | 'employ
 }
 
 // ── Auth ──
+// Public registration always creates EMPLOYEE accounts. The single admin
+// login is pre-provisioned; its email has no employees row so it resolves to admin.
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password } = req.body;
     if (!name || !email || !password) return res.status(400).json({ error: 'All fields required' });
     const { data: existing } = await supabase.from('users').select('id').eq('email', email).single();
     if (existing) return res.status(409).json({ error: 'Email already registered' });
@@ -50,16 +52,14 @@ app.post('/api/auth/register', async (req, res) => {
     const { data: user, error } = await supabase.from('users').insert({ name, email, password_hash: hash }).select().single();
     if (error) throw error;
     // Employee signups auto-appear in the employees list so the admin can assign leads
-    if (role === 'employee') {
-      const { data: empExisting } = await supabase.from('employees').select('id').ilike('email', email).limit(1);
-      if (!empExisting?.length) {
-        const colors = ['#0284c7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626','#0d9488'];
-        await supabase.from('employees').insert({
-          name, email, role: 'Agent',
-          avatar_color: colors[Math.floor(Math.random() * colors.length)],
-          created_by: user.id
-        });
-      }
+    const { data: empExisting } = await supabase.from('employees').select('id').ilike('email', email).limit(1);
+    if (!empExisting?.length) {
+      const colors = ['#0284c7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626','#0d9488'];
+      await supabase.from('employees').insert({
+        name, email, role: 'Agent',
+        avatar_color: colors[Math.floor(Math.random() * colors.length)],
+        created_by: user.id
+      });
     }
     const { role: resolvedRole, employeeId } = await resolveRoleByEmail(email);
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });

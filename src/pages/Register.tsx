@@ -6,7 +6,6 @@ export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'admin' | 'employee'>('admin');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
@@ -17,7 +16,7 @@ export default function Register() {
     setError('');
     setLoading(true);
     try {
-      await register(name, email, password, role);
+      await register(name, email, password);
       navigate('/');
     } catch (err: any) {
       setError(err.message);
@@ -29,35 +28,12 @@ export default function Register() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo">
-          <div className="logo-icon">🏢</div>
-          <h1>Create Account</h1>
-          <p className="auth-subtitle">Start managing your real estate leads</p>
+          <div className="logo-icon">🧑‍💼</div>
+          <h1>Employee Sign Up</h1>
+          <p className="auth-subtitle">Create your employee account — your admin will assign leads to you</p>
         </div>
         {error && <div className="error-msg">{error}</div>}
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Account Type</label>
-            <div className="role-toggle">
-              <button
-                type="button"
-                className={`role-option ${role === 'admin' ? 'active' : ''}`}
-                onClick={() => setRole('admin')}
-              >
-                <span className="role-icon">👑</span>
-                <span className="role-name">Admin</span>
-                <span className="role-desc">Full access, assigns leads</span>
-              </button>
-              <button
-                type="button"
-                className={`role-option ${role === 'employee' ? 'active' : ''}`}
-                onClick={() => setRole('employee')}
-              >
-                <span className="role-icon">🧑‍💼</span>
-                <span className="role-name">Employee</span>
-                <span className="role-desc">Works assigned leads only</span>
-              </button>
-            </div>
-          </div>
           <div className="form-group">
             <label>Full Name</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" required />
@@ -71,10 +47,11 @@ export default function Register() {
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min 6 characters" required minLength={6} />
           </div>
           <button className="btn btn-primary btn-lg" style={{ width: '100%' }} type="submit" disabled={loading}>
-            {loading ? 'Creating...' : role === 'admin' ? 'Create Admin Account' : 'Create Employee Account'}
+            {loading ? 'Creating...' : 'Create Employee Account'}
           </button>
         </form>
         <p className="auth-footer">Already have an account? <Link to="/login">Sign in</Link></p>
+        <p className="auth-footer" style={{ fontSize: 12, marginTop: 10 }}>Admin? Sign in with your admin credentials on the <Link to="/login">login page</Link>.</p>
       </div>
     </div>
   );
