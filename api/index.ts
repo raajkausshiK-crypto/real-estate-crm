@@ -40,31 +40,10 @@ async function getRoleForUser(userId: number): Promise<{ role: 'admin' | 'employ
 }
 
 // ── Auth ──
-// Public registration always creates EMPLOYEE accounts. The single admin
-// login is pre-provisioned; its email has no employees row so it resolves to admin.
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ error: 'All fields required' });
-    const { data: existing } = await supabase.from('users').select('id').eq('email', email).single();
-    if (existing) return res.status(409).json({ error: 'Email already registered' });
-    const hash = await bcrypt.hash(password, 10);
-    const { data: user, error } = await supabase.from('users').insert({ name, email, password_hash: hash }).select().single();
-    if (error) throw error;
-    // Employee signups auto-appear in the employees list so the admin can assign leads
-    const { data: empExisting } = await supabase.from('employees').select('id').ilike('email', email).limit(1);
-    if (!empExisting?.length) {
-      const colors = ['#0284c7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626','#0d9488'];
-      await supabase.from('employees').insert({
-        name, email, role: 'Agent',
-        avatar_color: colors[Math.floor(Math.random() * colors.length)],
-        created_by: user.id
-      });
-    }
-    const { role: resolvedRole, employeeId } = await resolveRoleByEmail(email);
-    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ user: { id: user.id, name: user.name, email: user.email, role: resolvedRole, employee_id: employeeId }, token });
-  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+// Public registration is disabled. Employee logins are created by the
+// admin from the Employees page; the single admin login is pre-provisioned.
+app.post('/api/auth/register', (_req, res) => {
+  res.status(403).json({ error: 'Registration is disabled. Ask your admin to create your login.' });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -73,6 +52,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
     const { data: user, error } = await supabase.from('users').select('*').eq('email', email).single();
     if (error || !user) return res.status(401).json({ error: 'Invalid credentials' });
+    if (String(user.password_hash).startsWith('DISABLED')) return res.status(401).json({ error: 'This account has been deactivated. Contact your admin.' });
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
     const { role, employeeId } = await resolveRoleByEmail(user.email);
@@ -300,11 +280,31 @@ app.delete('/api/properties/:id', auth, async (req: any, res) => {
 });
 
 // ── Employees ──
+// Creates/updates the employee's login (users row) when a password is given.
+async function upsertEmployeeLogin(name: string, email: string, password: string) {
+  const hash = await bcrypt.hash(password, 10);
+  const { data: existing } = await supabase.from('users').select('id').ilike('email', email).limit(1);
+  if (existing?.length) {
+    await supabase.from('users').update({ name, password_hash: hash }).eq('id', existing[0].id);
+  } else {
+    await supabase.from('users').insert({ name, email, password_hash: hash });
+  }
+}
+
 app.get('/api/employees', auth, async (req: any, res) => {
   try {
     const { data, error } = await supabase.from('employees').select('*').order('name');
     if (error) throw error;
-    res.json({ employees: data || [] });
+    const { data: users } = await supabase.from('users').select('email, password_hash');
+    const loginEmails = new Set(
+      (users || [])
+        .filter((u: any) => u.password_hash && !String(u.password_hash).startsWith('DISABLED'))
+        .map((u: any) => (u.email || '').toLowerCase())
+    );
+    const employees = (data || []).map((e: any) => ({
+      ...e, has_login: e.email ? loginEmails.has(e.email.toLowerCase()) : false
+    }));
+    res.json({ employees });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
@@ -312,8 +312,15 @@ app.post('/api/employees', auth, async (req: any, res) => {
   try {
     const { role: userRole } = await getRoleForUser(req.userId);
     if (userRole === 'employee') return res.status(403).json({ error: 'Only admins can manage employees' });
-    const { name, email, phone, role } = req.body;
+    const { name, email, phone, role, password } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (password && !email) return res.status(400).json({ error: 'Email is required to create a login' });
+    if (password && password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    // Guard: adding the admin's own email as an employee would lock them out of admin
+    const { data: me } = await supabase.from('users').select('email').eq('id', req.userId).single();
+    if (email && me?.email && email.toLowerCase() === me.email.toLowerCase()) {
+      return res.status(400).json({ error: 'You cannot add your own admin email as an employee' });
+    }
     const colors = ['#0284c7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626','#0d9488'];
     const color = colors[Math.floor(Math.random() * colors.length)];
     const { data, error } = await supabase.from('employees').insert({
@@ -321,6 +328,7 @@ app.post('/api/employees', auth, async (req: any, res) => {
       avatar_color: color, created_by: req.userId
     }).select().single();
     if (error) throw error;
+    if (password && email) await upsertEmployeeLogin(name, email, password);
     res.status(201).json(data);
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
@@ -329,11 +337,24 @@ app.put('/api/employees/:id', auth, async (req: any, res) => {
   try {
     const { role: userRole } = await getRoleForUser(req.userId);
     if (userRole === 'employee') return res.status(403).json({ error: 'Only admins can manage employees' });
-    const { name, email, phone, role } = req.body;
+    const { name, email, phone, role, password } = req.body;
+    if (password && !email) return res.status(400).json({ error: 'Email is required to create a login' });
+    if (password && password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const { data: me } = await supabase.from('users').select('email').eq('id', req.userId).single();
+    if (email && me?.email && email.toLowerCase() === me.email.toLowerCase()) {
+      return res.status(400).json({ error: 'You cannot use your own admin email for an employee' });
+    }
+    const { data: existing } = await supabase.from('employees').select('*').eq('id', req.params.id).single();
+    if (!existing) return res.status(404).json({ error: 'Not found' });
     const { data, error } = await supabase.from('employees').update({
       name, email: email || null, phone: phone || null, role: role || 'Agent'
     }).eq('id', req.params.id).select().single();
     if (error) throw error;
+    // Keep the login account in sync when the email stays the same
+    if (email && existing.email && email.toLowerCase() === existing.email.toLowerCase()) {
+      await supabase.from('users').update({ name }).ilike('email', email);
+    }
+    if (password && email) await upsertEmployeeLogin(name, email, password);
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
@@ -342,10 +363,15 @@ app.delete('/api/employees/:id', auth, async (req: any, res) => {
   try {
     const { role: userRole } = await getRoleForUser(req.userId);
     if (userRole === 'employee') return res.status(403).json({ error: 'Only admins can manage employees' });
+    const { data: emp } = await supabase.from('employees').select('email').eq('id', req.params.id).single();
     await supabase.from('leads').update({ assigned_to: null }).eq('assigned_to', req.params.id);
     const { data, error } = await supabase.from('employees').delete().eq('id', req.params.id).select();
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Not found' });
+    // Revoke the login so a removed employee can't sign in (or fall back to admin)
+    if (emp?.email) {
+      await supabase.from('users').update({ password_hash: `DISABLED-${Date.now()}` }).ilike('email', emp.email);
+    }
     res.json({ message: 'Employee deleted' });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
@@ -380,6 +406,18 @@ app.get('/api/calls/settings', auth, async (req: any, res) => {
     const { data, error } = await supabase.from('twilio_settings').select('*').eq('user_id', req.userId).single();
     if (error && error.code !== 'PGRST116') throw error;
     res.json({ settings: data || null });
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
+// TEMP: one-time removal of demo test accounts — delete this endpoint after use
+app.post('/api/admin/cleanup-test-users', auth, async (req: any, res) => {
+  try {
+    const { role } = await getRoleForUser(req.userId);
+    if (role === 'employee') return res.status(403).json({ error: 'Admins only' });
+    const testEmails = ['test-employee-demo@example.com', 'test-admin-demo@example.com', 'sneaky-test@example.com'];
+    const { data, error } = await supabase.from('users').delete().in('email', testEmails).select();
+    if (error) throw error;
+    res.json({ deleted: (data || []).map((u: any) => u.email) });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 

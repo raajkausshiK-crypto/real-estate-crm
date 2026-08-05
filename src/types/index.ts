@@ -80,6 +80,7 @@ export interface Employee {
   role: string;
   avatar_color: string;
   created_at: string;
+  has_login?: boolean;
 }
 
 export interface PropertyInterest {
