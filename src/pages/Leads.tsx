@@ -3,6 +3,7 @@ import { api } from '../utils/api';
 import { Lead, Contact, Employee } from '../types';
 import Modal from '../components/Modal';
 import { CallButton } from './Calls';
+import { useAuth } from '../context/AuthContext';
 
 const STATUS_OPTIONS = ['Hot', 'Warm', 'Cold', 'Follow-up Needed', 'Closed'] as const;
 const STATUS_CLASSES: Record<string, string> = {
@@ -24,6 +25,8 @@ const EMPTY_FORM = {
 };
 
 export default function Leads() {
+  const { user } = useAuth();
+  const isEmployee = user?.role === 'employee';
   const [leads, setLeads] = useState<Lead[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
@@ -97,8 +100,8 @@ export default function Leads() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Leads</h1>
-          <p className="subtitle">{total} total leads in your pipeline</p>
+          <h1>{isEmployee ? 'My Leads' : 'Leads'}</h1>
+          <p className="subtitle">{isEmployee ? `${total} leads assigned to you` : `${total} total leads in your pipeline`}</p>
         </div>
         <button className="btn btn-primary" onClick={openAdd}>+ Add Lead</button>
       </div>
@@ -145,14 +148,18 @@ export default function Leads() {
                       ))}
                     </td>
                     <td onClick={e => e.stopPropagation()}>
-                      <select
-                        className="assign-select"
-                        value={l.assigned_to || ''}
-                        onChange={e => api.put(`/leads/${l.id}`, { assigned_to: e.target.value ? Number(e.target.value) : null }).then(fetchLeads)}
-                      >
-                        <option value="">Unassigned</option>
-                        {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-                      </select>
+                      {isEmployee ? (
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{l.assigned_name || 'Unassigned'}</span>
+                      ) : (
+                        <select
+                          className="assign-select"
+                          value={l.assigned_to || ''}
+                          onChange={e => api.put(`/leads/${l.id}`, { assigned_to: e.target.value ? Number(e.target.value) : null }).then(fetchLeads)}
+                        >
+                          <option value="">Unassigned</option>
+                          {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                        </select>
+                      )}
                     </td>
                     <td><span className={`badge ${l.buyer_purpose === 'Investor' ? 'badge-warm' : 'badge-cold'}`}>{l.buyer_purpose || 'Self Use'}</span></td>
                     <td><span className={`badge ${l.pattern === 'Closure' ? 'badge-success' : l.pattern === 'Visit' ? 'badge-followup' : 'badge-active'}`}>{l.pattern || 'Call'}</span></td>
@@ -162,7 +169,9 @@ export default function Leads() {
                     <td className="actions" onClick={e => e.stopPropagation()}>
                       <CallButton phone={l.contact_phone} contactId={l.contact_id} leadId={l.id} />
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(l)}>Edit</button>
-                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(l.id)}>Delete</button>
+                      {!isEmployee && (
+                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(l.id)}>Delete</button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -282,25 +291,27 @@ export default function Leads() {
               </div>
             </fieldset>
 
-            <fieldset className="lead-fieldset"><legend>Assignment</legend>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Assign To</label>
-                  <select value={form.assigned_to} onChange={e => setForm(f => ({ ...f, assigned_to: e.target.value }))}>
-                    <option value="">Unassigned</option>
-                    {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name} — {emp.role}</option>)}
-                  </select>
+            {!isEmployee && (
+              <fieldset className="lead-fieldset"><legend>Assignment</legend>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Assign To</label>
+                    <select value={form.assigned_to} onChange={e => setForm(f => ({ ...f, assigned_to: e.target.value }))}>
+                      <option value="">Unassigned</option>
+                      {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name} — {emp.role}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Assigned By</label>
+                    <input value={form.assigned_by} onChange={e => setForm(f => ({ ...f, assigned_by: e.target.value }))} placeholder="Manager name" />
+                  </div>
+                  <div className="form-group">
+                    <label>Assign Date & Time</label>
+                    <input type="datetime-local" value={form.lead_assign_date} onChange={e => setForm(f => ({ ...f, lead_assign_date: e.target.value }))} />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label>Assigned By</label>
-                  <input value={form.assigned_by} onChange={e => setForm(f => ({ ...f, assigned_by: e.target.value }))} placeholder="Manager name" />
-                </div>
-                <div className="form-group">
-                  <label>Assign Date & Time</label>
-                  <input type="datetime-local" value={form.lead_assign_date} onChange={e => setForm(f => ({ ...f, lead_assign_date: e.target.value }))} />
-                </div>
-              </div>
-            </fieldset>
+              </fieldset>
+            )}
 
             <fieldset className="lead-fieldset"><legend>Follow-up & Calls</legend>
               <div className="form-row">

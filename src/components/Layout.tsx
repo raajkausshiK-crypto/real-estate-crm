@@ -7,10 +7,10 @@ const NAV_ITEMS = [
   { to: '/pipeline', label: 'Pipeline', icon: '📋' },
   { to: '/contacts', label: 'Contacts', icon: '👥' },
   { to: '/properties', label: 'Properties', icon: '🏠' },
-  { to: '/import-export', label: 'Import / Export', icon: '📁' },
-  { to: '/employees', label: 'Employees', icon: '🧑‍💼' },
+  { to: '/import-export', label: 'Import / Export', icon: '📁', adminOnly: true },
+  { to: '/employees', label: 'Employees', icon: '🧑‍💼', adminOnly: true },
   { to: '/calls', label: 'Calls', icon: '📞' },
-  { to: '/integrations', label: 'Ad Integrations', icon: '🔗' },
+  { to: '/integrations', label: 'Ad Integrations', icon: '🔗', adminOnly: true },
 ];
 
 export default function Layout() {
@@ -20,6 +20,8 @@ export default function Layout() {
   const handleLogout = () => { logout(); navigate('/login'); };
 
   const initials = user?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?';
+  const isEmployee = user?.role === 'employee';
+  const navItems = NAV_ITEMS.filter(item => !item.adminOnly || !isEmployee);
 
   return (
     <div className="app-layout">
@@ -30,7 +32,7 @@ export default function Layout() {
         </div>
         <div className="sidebar-section-label">Menu</div>
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map(item => (
+          {navItems.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -46,7 +48,12 @@ export default function Layout() {
           <div className="sidebar-user">
             <div className="sidebar-avatar">{initials}</div>
             <div className="sidebar-user-info">
-              <div className="sidebar-user-name">{user?.name}</div>
+              <div className="sidebar-user-name">
+                {user?.name}
+                <span className={`role-badge ${isEmployee ? 'role-badge-employee' : 'role-badge-admin'}`}>
+                  {isEmployee ? 'Employee' : 'Admin'}
+                </span>
+              </div>
               <div className="sidebar-user-email">{user?.email}</div>
             </div>
           </div>

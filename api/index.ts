@@ -25,18 +25,45 @@ function auth(req: any, res: any, next: any) {
   } catch { return res.status(401).json({ error: 'Invalid token' }); }
 }
 
+// A user is an "employee" if their email matches a row in the employees table;
+// otherwise they are an admin. Employees only see leads assigned to them.
+async function resolveRoleByEmail(email: string): Promise<{ role: 'admin' | 'employee'; employeeId: number | null }> {
+  if (!email) return { role: 'admin', employeeId: null };
+  const { data: emp } = await supabase.from('employees').select('id').ilike('email', email).limit(1);
+  if (emp?.length) return { role: 'employee', employeeId: emp[0].id };
+  return { role: 'admin', employeeId: null };
+}
+
+async function getRoleForUser(userId: number): Promise<{ role: 'admin' | 'employee'; employeeId: number | null }> {
+  const { data: user } = await supabase.from('users').select('email').eq('id', userId).single();
+  return resolveRoleByEmail(user?.email || '');
+}
+
 // ── Auth ──
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
     if (!name || !email || !password) return res.status(400).json({ error: 'All fields required' });
     const { data: existing } = await supabase.from('users').select('id').eq('email', email).single();
     if (existing) return res.status(409).json({ error: 'Email already registered' });
     const hash = await bcrypt.hash(password, 10);
     const { data: user, error } = await supabase.from('users').insert({ name, email, password_hash: hash }).select().single();
     if (error) throw error;
+    // Employee signups auto-appear in the employees list so the admin can assign leads
+    if (role === 'employee') {
+      const { data: empExisting } = await supabase.from('employees').select('id').ilike('email', email).limit(1);
+      if (!empExisting?.length) {
+        const colors = ['#0284c7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626','#0d9488'];
+        await supabase.from('employees').insert({
+          name, email, role: 'Agent',
+          avatar_color: colors[Math.floor(Math.random() * colors.length)],
+          created_by: user.id
+        });
+      }
+    }
+    const { role: resolvedRole, employeeId } = await resolveRoleByEmail(email);
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ user: { id: user.id, name: user.name, email: user.email }, token });
+    res.status(201).json({ user: { id: user.id, name: user.name, email: user.email, role: resolvedRole, employee_id: employeeId }, token });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
@@ -48,8 +75,9 @@ app.post('/api/auth/login', async (req, res) => {
     if (error || !user) return res.status(401).json({ error: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+    const { role, employeeId } = await resolveRoleByEmail(user.email);
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ user: { id: user.id, name: user.name, email: user.email }, token });
+    res.json({ user: { id: user.id, name: user.name, email: user.email, role, employee_id: employeeId }, token });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
@@ -58,10 +86,12 @@ app.get('/api/leads', auth, async (req: any, res) => {
   try {
     const { status, search, page = '1', limit = '20' } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
+    const { role, employeeId } = await getRoleForUser(req.userId);
     let query = supabase.from('leads').select(`
       *, contacts!leads_contact_id_fkey(name, email, phone),
       employees!leads_assigned_to_fkey(name, avatar_color)
     `, { count: 'exact' }).order('updated_at', { ascending: false }).range(offset, offset + Number(limit) - 1);
+    if (role === 'employee') query = query.eq('assigned_to', employeeId);
     if (status) query = query.eq('status', status);
     const { data: leads, count, error } = await query;
     if (error) throw error;
@@ -81,10 +111,13 @@ app.get('/api/leads', auth, async (req: any, res) => {
 
 app.get('/api/leads/pipeline', auth, async (req: any, res) => {
   try {
-    const { data: leads, error } = await supabase.from('leads').select(`
+    const { role, employeeId } = await getRoleForUser(req.userId);
+    let query = supabase.from('leads').select(`
       *, contacts!leads_contact_id_fkey(name, email, phone),
       employees!leads_assigned_to_fkey(name, avatar_color)
     `).order('updated_at', { ascending: false });
+    if (role === 'employee') query = query.eq('assigned_to', employeeId);
+    const { data: leads, error } = await query;
     if (error) throw error;
     const pipeline: Record<string, any[]> = { 'Hot': [], 'Warm': [], 'Cold': [], 'Follow-up Needed': [], 'Closed': [] };
     for (const l of leads || []) {
@@ -101,6 +134,8 @@ app.get('/api/leads/:id', auth, async (req: any, res) => {
       *, contacts!leads_contact_id_fkey(name, email, phone)
     `).eq('id', req.params.id).single();
     if (error || !lead) return res.status(404).json({ error: 'Lead not found' });
+    const { role, employeeId } = await getRoleForUser(req.userId);
+    if (role === 'employee' && lead.assigned_to !== employeeId) return res.status(404).json({ error: 'Lead not found' });
     res.json({ ...lead, contact_name: lead.contacts?.name, contact_email: lead.contacts?.email, contact_phone: lead.contacts?.phone, contacts: undefined });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
@@ -109,9 +144,12 @@ app.post('/api/leads', auth, async (req: any, res) => {
   try {
     const b = req.body;
     if (!b.contact_id) return res.status(400).json({ error: 'contact_id is required' });
+    // Leads created by an employee are auto-assigned to them so they stay visible
+    const { role, employeeId } = await getRoleForUser(req.userId);
+    const assignedTo = role === 'employee' ? (b.assigned_to || employeeId) : (b.assigned_to || null);
     const { data, error } = await supabase.from('leads').insert({
       contact_id: b.contact_id, status: b.status || 'Warm', source: b.source || null,
-      notes: b.notes || null, assigned_to: b.assigned_to || null, budget: b.budget || null,
+      notes: b.notes || null, assigned_to: assignedTo, budget: b.budget || null,
       project_lead_for: b.project_lead_for || null, suggested_projects: b.suggested_projects || null,
       location_looking: b.location_looking || null, remarks: b.remarks || null,
       next_call_date: b.next_call_date || null, next_call_time: b.next_call_time || null,
@@ -132,6 +170,8 @@ app.put('/api/leads/:id', auth, async (req: any, res) => {
     const b = req.body;
     const { data: existing, error: fetchErr } = await supabase.from('leads').select('*').eq('id', req.params.id).single();
     if (fetchErr || !existing) return res.status(404).json({ error: 'Lead not found' });
+    const { role, employeeId } = await getRoleForUser(req.userId);
+    if (role === 'employee' && existing.assigned_to !== employeeId) return res.status(403).json({ error: 'You can only update leads assigned to you' });
     const v = (key: string) => b[key] !== undefined ? (b[key] || null) : existing[key];
     const { data, error } = await supabase.from('leads').update({
       status: b.status ?? existing.status, source: v('source'), notes: v('notes'),
@@ -151,6 +191,8 @@ app.put('/api/leads/:id', auth, async (req: any, res) => {
 
 app.delete('/api/leads/:id', auth, async (req: any, res) => {
   try {
+    const { role } = await getRoleForUser(req.userId);
+    if (role === 'employee') return res.status(403).json({ error: 'Only admins can delete leads' });
     const { data, error } = await supabase.from('leads').delete().eq('id', req.params.id).select();
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Lead not found' });
@@ -268,6 +310,8 @@ app.get('/api/employees', auth, async (req: any, res) => {
 
 app.post('/api/employees', auth, async (req: any, res) => {
   try {
+    const { role: userRole } = await getRoleForUser(req.userId);
+    if (userRole === 'employee') return res.status(403).json({ error: 'Only admins can manage employees' });
     const { name, email, phone, role } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
     const colors = ['#0284c7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626','#0d9488'];
@@ -283,6 +327,8 @@ app.post('/api/employees', auth, async (req: any, res) => {
 
 app.put('/api/employees/:id', auth, async (req: any, res) => {
   try {
+    const { role: userRole } = await getRoleForUser(req.userId);
+    if (userRole === 'employee') return res.status(403).json({ error: 'Only admins can manage employees' });
     const { name, email, phone, role } = req.body;
     const { data, error } = await supabase.from('employees').update({
       name, email: email || null, phone: phone || null, role: role || 'Agent'
@@ -294,6 +340,8 @@ app.put('/api/employees/:id', auth, async (req: any, res) => {
 
 app.delete('/api/employees/:id', auth, async (req: any, res) => {
   try {
+    const { role: userRole } = await getRoleForUser(req.userId);
+    if (userRole === 'employee') return res.status(403).json({ error: 'Only admins can manage employees' });
     await supabase.from('leads').update({ assigned_to: null }).eq('assigned_to', req.params.id);
     const { data, error } = await supabase.from('employees').delete().eq('id', req.params.id).select();
     if (error) throw error;

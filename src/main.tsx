@@ -42,6 +42,11 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return token ? <>{children}</> : <Navigate to="/login" />;
 }
 
+function AdminRoute({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  return user?.role === 'employee' ? <Navigate to="/" /> : <>{children}</>;
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -55,10 +60,10 @@ function App() {
             <Route path="pipeline" element={<ErrorBoundary><Pipeline /></ErrorBoundary>} />
             <Route path="contacts" element={<ErrorBoundary><Contacts /></ErrorBoundary>} />
             <Route path="properties" element={<ErrorBoundary><Properties /></ErrorBoundary>} />
-            <Route path="import-export" element={<ErrorBoundary><ImportExport /></ErrorBoundary>} />
-            <Route path="integrations" element={<ErrorBoundary><Integrations /></ErrorBoundary>} />
+            <Route path="import-export" element={<AdminRoute><ErrorBoundary><ImportExport /></ErrorBoundary></AdminRoute>} />
+            <Route path="integrations" element={<AdminRoute><ErrorBoundary><Integrations /></ErrorBoundary></AdminRoute>} />
             <Route path="calls" element={<ErrorBoundary><Calls /></ErrorBoundary>} />
-            <Route path="employees" element={<ErrorBoundary><Employees /></ErrorBoundary>} />
+            <Route path="employees" element={<AdminRoute><ErrorBoundary><Employees /></ErrorBoundary></AdminRoute>} />
           </Route>
         </Routes>
       </BrowserRouter>

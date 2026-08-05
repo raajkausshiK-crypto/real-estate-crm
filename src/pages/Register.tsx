@@ -6,6 +6,7 @@ export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'admin' | 'employee'>('admin');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
@@ -16,7 +17,7 @@ export default function Register() {
     setError('');
     setLoading(true);
     try {
-      await register(name, email, password);
+      await register(name, email, password, role);
       navigate('/');
     } catch (err: any) {
       setError(err.message);
@@ -35,6 +36,29 @@ export default function Register() {
         {error && <div className="error-msg">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
+            <label>Account Type</label>
+            <div className="role-toggle">
+              <button
+                type="button"
+                className={`role-option ${role === 'admin' ? 'active' : ''}`}
+                onClick={() => setRole('admin')}
+              >
+                <span className="role-icon">👑</span>
+                <span className="role-name">Admin</span>
+                <span className="role-desc">Full access, assigns leads</span>
+              </button>
+              <button
+                type="button"
+                className={`role-option ${role === 'employee' ? 'active' : ''}`}
+                onClick={() => setRole('employee')}
+              >
+                <span className="role-icon">🧑‍💼</span>
+                <span className="role-name">Employee</span>
+                <span className="role-desc">Works assigned leads only</span>
+              </button>
+            </div>
+          </div>
+          <div className="form-group">
             <label>Full Name</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" required />
           </div>
@@ -47,7 +71,7 @@ export default function Register() {
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min 6 characters" required minLength={6} />
           </div>
           <button className="btn btn-primary btn-lg" style={{ width: '100%' }} type="submit" disabled={loading}>
-            {loading ? 'Creating...' : 'Create Account'}
+            {loading ? 'Creating...' : role === 'admin' ? 'Create Admin Account' : 'Create Employee Account'}
           </button>
         </form>
         <p className="auth-footer">Already have an account? <Link to="/login">Sign in</Link></p>
