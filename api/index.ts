@@ -409,18 +409,6 @@ app.get('/api/calls/settings', auth, async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
-// TEMP: one-time removal of demo test accounts — delete this endpoint after use
-app.post('/api/admin/cleanup-test-users', auth, async (req: any, res) => {
-  try {
-    const { role } = await getRoleForUser(req.userId);
-    if (role === 'employee') return res.status(403).json({ error: 'Admins only' });
-    const testEmails = ['test-employee-demo@example.com', 'test-admin-demo@example.com', 'sneaky-test@example.com'];
-    const { data, error } = await supabase.from('users').delete().in('email', testEmails).select();
-    if (error) throw error;
-    res.json({ deleted: (data || []).map((u: any) => u.email) });
-  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
-});
-
 // ── Health ──
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', db: 'supabase', timestamp: new Date().toISOString() });
