@@ -52,15 +52,24 @@ export default function Integrations() {
     setSaving(false);
   };
 
-  const fetchNow = async () => {
-    setFetching(true); setError(''); setResult('');
+  const fetchNow = async (silent = false) => {
+    if (!silent) { setFetching(true); setError(''); setResult(''); }
     try {
-      const res = await api.post<{ message: string }>('/integrations/google-sheet/fetch', { sheet_url: sheetUrl.trim() });
-      setResult(res.message);
+      const res = await api.post<{ message: string; imported: number }>('/integrations/google-sheet/fetch', { sheet_url: sheetUrl.trim() });
+      if (!silent || res.imported > 0) setResult(res.message);
       fetchData();
-    } catch (err: any) { setError(err.message); }
-    setFetching(false);
+    } catch (err: any) { if (!silent) setError(err.message); }
+    if (!silent) setFetching(false);
   };
+
+  // Auto-sync on page open when enabled (throttled to once every 10 min)
+  useEffect(() => {
+    if (!google?.enabled || !google?.config?.sheet_url) return;
+    const last = Number(localStorage.getItem('sheetSyncAt') || 0);
+    if (Date.now() - last < 10 * 60 * 1000) return;
+    localStorage.setItem('sheetSyncAt', String(Date.now()));
+    fetchNow(true);
+  }, [google?.enabled, google?.config?.sheet_url]);
 
   return (
     <div>

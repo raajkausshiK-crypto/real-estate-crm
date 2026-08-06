@@ -7,6 +7,6 @@
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/api/cron/sheet-sync", "schedule": "0 * * * *" }
+    { "path": "/api/cron/sheet-sync", "schedule": "0 6 * * *" }
   ]
 }
