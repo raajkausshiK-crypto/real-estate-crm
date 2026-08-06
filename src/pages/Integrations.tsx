@@ -104,7 +104,7 @@ export default function Integrations() {
               onChange={e => setSheetUrl(e.target.value)}
               placeholder="https://docs.google.com/spreadsheets/d/.../edit"
             />
-            <p className="hint">Paste the link to your sheet. When auto-sync is ON, new rows are pulled in automatically every hour.</p>
+            <p className="hint">Paste the link to your sheet. When auto-sync is ON, new rows are pulled in automatically once a day and each time you open this page. Use Fetch Now anytime for an instant pull.</p>
           </div>
 
           <div className="flex gap-2" style={{ marginTop: 20 }}>
