@@ -588,11 +588,18 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-// Turn any Google Sheets link into its CSV export URL
+// Turn any Google Sheets link into a fetchable CSV URL.
+// Handles both normal edit links and "Publish to web" links (/d/e/<token>/pub…).
 function sheetCsvUrl(sheetUrl: string): string | null {
-  const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9\-_]+)/);
+  const u = (sheetUrl || '').trim();
+  if (u.includes('/spreadsheets/d/e/')) {
+    const base = u.split('/pub')[0] + '/pub';
+    const gid = u.match(/[?&]gid=([0-9]+)/);
+    return base + '?output=csv' + (gid ? `&gid=${gid[1]}&single=true` : '');
+  }
+  const idMatch = u.match(/\/spreadsheets\/d\/([a-zA-Z0-9\-_]+)/);
   if (!idMatch) return null;
-  const gidMatch = sheetUrl.match(/[#&?]gid=([0-9]+)/);
+  const gidMatch = u.match(/[#&?]gid=([0-9]+)/);
   return `https://docs.google.com/spreadsheets/d/${idMatch[1]}/export?format=csv&gid=${gidMatch ? gidMatch[1] : '0'}`;
 }
 
