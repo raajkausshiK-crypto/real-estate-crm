@@ -627,9 +627,12 @@ async function importFromSheet(userId: number, sheetUrl: string) {
   if (rows.length < 2) return { imported: 0, skipped: 0, total: 0 };
   const headers = rows[0].map(mapHeader);
 
-  const { data: existing } = await supabase.from('contacts').select('email, phone');
-  const emails = new Set((existing || []).map((c: any) => (c.email || '').toLowerCase()).filter(Boolean));
+  const { data: existing } = await supabase.from('contacts').select('name, email, phone, city, state');
+  const norm = (s: string) => (s || '').trim().toLowerCase();
+  const sig = (c: any) => `${norm(c.name)}|${norm(c.city)}|${norm(c.state)}`;
+  const emails = new Set((existing || []).map((c: any) => norm(c.email)).filter(Boolean));
   const phones = new Set((existing || []).map((c: any) => (c.phone || '').replace(/\D/g, '')).filter((p: string) => p.length >= 7));
+  const sigs = new Set((existing || []).map(sig));
 
   let imported = 0, skipped = 0;
   for (let r = 1; r < rows.length; r++) {
@@ -640,12 +643,15 @@ async function importFromSheet(userId: number, sheetUrl: string) {
       if (f && !rec[f]) rec[f] = v;
       else if (!f) extras.push(`${(rows[0][i] || 'Field').trim()}: ${v}`);
     });
-    const email = (rec.email || '').toLowerCase();
+    const email = norm(rec.email);
     const phoneDigits = (rec.phone || '').replace(/\D/g, '');
+    const rowSig = sig(rec);
     if (!rec.name && !email && !phoneDigits) { skipped++; continue; }
-    if ((email && emails.has(email)) || (phoneDigits.length >= 7 && phones.has(phoneDigits))) { skipped++; continue; }
+    // Dedupe: strong match on email/phone, fallback to name+city+state signature
+    if ((email && emails.has(email)) || (phoneDigits.length >= 7 && phones.has(phoneDigits)) || sigs.has(rowSig)) { skipped++; continue; }
     if (email) emails.add(email);
     if (phoneDigits.length >= 7) phones.add(phoneDigits);
+    sigs.add(rowSig);
     const { data: contact, error: cErr } = await supabase.from('contacts').insert({
       name: rec.name || 'Sheet Lead', email: rec.email || null, phone: rec.phone || null,
       city: rec.city || null, state: rec.state || null, address: rec.address || null,
