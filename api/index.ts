@@ -2,11 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const genToken = () => crypto.randomBytes(24).toString('hex');
 
 const supabase = createClient(
   process.env.SUPABASE_URL || '',
@@ -376,7 +379,7 @@ app.delete('/api/employees/:id', auth, async (req: any, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
-// ── Integrations ──
+// ── Integrations (Meta Lead Ads) ──
 app.get('/api/integrations', auth, async (req: any, res) => {
   try {
     const { data, error } = await supabase.from('integrations').select('*').eq('user_id', req.userId);
@@ -384,6 +387,163 @@ app.get('/api/integrations', auth, async (req: any, res) => {
     const meta = (data || []).find((i: any) => i.platform === 'meta') || null;
     const google = (data || []).find((i: any) => i.platform === 'google') || null;
     res.json({ meta, google });
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
+// Save/enable an integration's config (admin only)
+app.put('/api/integrations/:platform', auth, async (req: any, res) => {
+  try {
+    const { role } = await getRoleForUser(req.userId);
+    if (role === 'employee') return res.status(403).json({ error: 'Only admins can configure integrations' });
+    const platform = req.params.platform;
+    if (!['meta', 'google'].includes(platform)) return res.status(400).json({ error: 'Unknown platform' });
+    const { config = {}, enabled = false } = req.body;
+    const { data: existing } = await supabase.from('integrations').select('*').eq('user_id', req.userId).eq('platform', platform).single();
+    const webhook_token = existing?.webhook_token || genToken();
+    if (existing) {
+      const { data, error } = await supabase.from('integrations').update({ config, enabled, webhook_token, updated_at: new Date().toISOString() }).eq('id', existing.id).select().single();
+      if (error) throw error;
+      return res.json(data);
+    }
+    const { data, error } = await supabase.from('integrations').insert({ user_id: req.userId, platform, config, enabled, webhook_token }).select().single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
+// Rotate the webhook token (admin only)
+app.post('/api/integrations/:platform/regenerate-token', auth, async (req: any, res) => {
+  try {
+    const { role } = await getRoleForUser(req.userId);
+    if (role === 'employee') return res.status(403).json({ error: 'Only admins can configure integrations' });
+    const platform = req.params.platform;
+    const { data: existing } = await supabase.from('integrations').select('*').eq('user_id', req.userId).eq('platform', platform).single();
+    if (!existing) return res.status(404).json({ error: 'Save settings first' });
+    const { data, error } = await supabase.from('integrations').update({ webhook_token: genToken(), updated_at: new Date().toISOString() }).eq('id', existing.id).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
+// Recent webhook activity for the dashboard log
+app.get('/api/integrations/webhook-logs', auth, async (req: any, res) => {
+  try {
+    const { data, error } = await supabase.from('webhook_logs').select('*').eq('user_id', req.userId).order('created_at', { ascending: false }).limit(30);
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
+// Map Meta lead-form field_data into a contact record
+function mapMetaFields(fieldData: { name: string; values: string[] }[]) {
+  const get = (...names: string[]) => {
+    for (const n of names) {
+      const f = fieldData.find(x => x.name?.toLowerCase() === n);
+      if (f?.values?.length) return f.values[0];
+    }
+    return '';
+  };
+  const first = get('first_name'); const last = get('last_name');
+  const name = get('full_name', 'name') || [first, last].filter(Boolean).join(' ') || 'Meta Lead';
+  const extra = fieldData
+    .filter(f => !['full_name', 'name', 'first_name', 'last_name', 'email', 'phone_number', 'city', 'state', 'street_address'].includes(f.name?.toLowerCase()))
+    .map(f => `${f.name}: ${(f.values || []).join(', ')}`).join('\n');
+  return {
+    name, email: get('email') || null, phone: get('phone_number', 'phone') || null,
+    city: get('city') || null, state: get('state') || null, address: get('street_address') || null,
+    notes: ['Lead captured from Meta Lead Ad', extra].filter(Boolean).join('\n') || null,
+  };
+}
+
+// Create a contact + Warm lead from a mapped Meta lead, return the new lead id
+async function ingestLead(userId: number, fields: ReturnType<typeof mapMetaFields>) {
+  const { data: contact, error: cErr } = await supabase.from('contacts').insert({
+    name: fields.name, email: fields.email, phone: fields.phone, city: fields.city,
+    state: fields.state, address: fields.address, notes: fields.notes, created_by: userId,
+  }).select().single();
+  if (cErr) throw cErr;
+  const { data: lead, error: lErr } = await supabase.from('leads').insert({
+    contact_id: contact.id, status: 'Warm', source: 'Meta Ads', buyer_purpose: 'Self Use',
+    pattern: 'Call', notes: fields.notes, created_by: userId,
+  }).select().single();
+  if (lErr) throw lErr;
+  return lead.id;
+}
+
+// Meta webhook — VERIFICATION handshake (Meta calls this with hub.* params, no auth)
+app.get('/api/webhooks/:platform/:token', async (req: any, res) => {
+  try {
+    const { token } = req.params;
+    const mode = req.query['hub.mode'];
+    const verifyToken = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    const { data: integ } = await supabase.from('integrations').select('*').eq('webhook_token', token).single();
+    if (!integ) return res.sendStatus(404);
+    const expected = integ.config?.verify_token;
+    if (mode === 'subscribe' && expected && verifyToken === expected) {
+      return res.status(200).send(String(challenge));
+    }
+    return res.sendStatus(403);
+  } catch { return res.sendStatus(403); }
+});
+
+// Meta webhook — LEAD DELIVERY (Meta POSTs leadgen changes here, no auth)
+app.post('/api/webhooks/:platform/:token', async (req: any, res) => {
+  const { token } = req.params;
+  const { data: integ } = await supabase.from('integrations').select('*').eq('webhook_token', token).single();
+  // Always 200 to Meta so it doesn't retry; record problems in the log instead
+  if (!integ) return res.sendStatus(200);
+  const userId = integ.user_id;
+  const accessToken = integ.config?.access_token;
+  try {
+    const entries = req.body?.entry || [];
+    let processed = 0;
+    for (const entry of entries) {
+      for (const change of entry.changes || []) {
+        if (change.field !== 'leadgen') continue;
+        const leadgenId = change.value?.leadgen_id;
+        if (!leadgenId) continue;
+        if (!accessToken) {
+          await supabase.from('webhook_logs').insert({ platform: 'meta', user_id: userId, payload: change.value, status: 'error', error: 'No Page Access Token configured — cannot fetch lead details' });
+          continue;
+        }
+        const gr = await fetch(`https://graph.facebook.com/v21.0/${leadgenId}?access_token=${encodeURIComponent(accessToken)}`);
+        const detail: any = await gr.json();
+        if (!gr.ok || detail.error) {
+          await supabase.from('webhook_logs').insert({ platform: 'meta', user_id: userId, payload: detail, status: 'error', error: detail.error?.message || 'Graph API error' });
+          continue;
+        }
+        const fields = mapMetaFields(detail.field_data || []);
+        const leadId = await ingestLead(userId, fields);
+        await supabase.from('webhook_logs').insert({ platform: 'meta', user_id: userId, payload: detail, status: 'processed', lead_id: leadId });
+        processed++;
+      }
+    }
+    if (!processed && entries.length) {
+      await supabase.from('webhook_logs').insert({ platform: 'meta', user_id: userId, payload: req.body, status: 'received', error: 'No leadgen events in payload' });
+    }
+    res.sendStatus(200);
+  } catch (err: any) {
+    await supabase.from('webhook_logs').insert({ platform: 'meta', user_id: userId, payload: req.body, status: 'error', error: err.message || 'Processing error' });
+    res.sendStatus(200);
+  }
+});
+
+// Simulate a lead so admins can verify the pipeline end-to-end (admin only)
+app.post('/api/webhooks/test/:platform/:token', auth, async (req: any, res) => {
+  try {
+    const { role } = await getRoleForUser(req.userId);
+    if (role === 'employee') return res.status(403).json({ error: 'Only admins can send test leads' });
+    const { token } = req.params;
+    const { data: integ } = await supabase.from('integrations').select('*').eq('webhook_token', token).eq('user_id', req.userId).single();
+    if (!integ) return res.status(404).json({ error: 'Save settings first' });
+    const stamp = new Date().toLocaleTimeString();
+    const leadId = await ingestLead(req.userId, {
+      name: `Test Lead (Meta) ${stamp}`, email: 'test.lead@meta.example', phone: '+91 90000 00000',
+      city: 'Gurgaon', state: 'HR', address: null, notes: 'Simulated Meta test lead — safe to delete',
+    });
+    await supabase.from('webhook_logs').insert({ platform: 'meta', user_id: req.userId, payload: { test: true }, status: 'processed', lead_id: leadId });
+    res.json({ message: '✅ Test lead created — open the Leads page to see it' });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 
@@ -406,6 +566,137 @@ app.get('/api/calls/settings', auth, async (req: any, res) => {
     const { data, error } = await supabase.from('twilio_settings').select('*').eq('user_id', req.userId).single();
     if (error && error.code !== 'PGRST116') throw error;
     res.json({ settings: data || null });
+  } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
+});
+
+// ── Google Sheets Lead Import ──
+// Minimal RFC-4180 CSV parser (handles quotes, escaped quotes, newlines in fields)
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (c !== '\r') field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+// Turn any Google Sheets link into its CSV export URL
+function sheetCsvUrl(sheetUrl: string): string | null {
+  const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9\-_]+)/);
+  if (!idMatch) return null;
+  const gidMatch = sheetUrl.match(/[#&?]gid=([0-9]+)/);
+  return `https://docs.google.com/spreadsheets/d/${idMatch[1]}/export?format=csv&gid=${gidMatch ? gidMatch[1] : '0'}`;
+}
+
+const HEADER_MAP: { field: string; keys: string[] }[] = [
+  { field: 'name', keys: ['full name', 'fullname', 'full_name', 'name', 'lead name', 'contact name', 'customer name'] },
+  { field: 'email', keys: ['email', 'email address', 'e-mail', 'mail'] },
+  { field: 'phone', keys: ['phone', 'phone number', 'phone_number', 'mobile', 'mobile number', 'contact number', 'whatsapp', 'contact'] },
+  { field: 'city', keys: ['city', 'town'] },
+  { field: 'state', keys: ['state', 'region'] },
+  { field: 'address', keys: ['address', 'street address'] },
+  { field: 'budget', keys: ['budget', 'price range'] },
+  { field: 'source', keys: ['source', 'lead source', 'campaign'] },
+  { field: 'location_looking', keys: ['looking for', 'location looking', 'interested in', 'requirement', 'project', 'location'] },
+];
+function mapHeader(header: string): string | null {
+  const h = (header || '').trim().toLowerCase();
+  if (!h) return null;
+  for (const m of HEADER_MAP) if (m.keys.includes(h)) return m.field;
+  for (const m of HEADER_MAP) if (m.keys.some(k => h.includes(k))) return m.field;
+  return null;
+}
+
+async function importFromSheet(userId: number, sheetUrl: string) {
+  const csvUrl = sheetCsvUrl(sheetUrl);
+  if (!csvUrl) throw new Error('That does not look like a Google Sheets link.');
+  const resp = await fetch(csvUrl, { redirect: 'follow' });
+  const text = await resp.text();
+  if (!resp.ok || text.trimStart().startsWith('<') ) {
+    throw new Error("Couldn't read the sheet. Set sharing to 'Anyone with the link → Viewer' (or File → Share → Publish to web).");
+  }
+  const rows = parseCsv(text).filter(r => r.some(c => c.trim() !== ''));
+  if (rows.length < 2) return { imported: 0, skipped: 0, total: 0 };
+  const headers = rows[0].map(mapHeader);
+
+  const { data: existing } = await supabase.from('contacts').select('email, phone');
+  const emails = new Set((existing || []).map((c: any) => (c.email || '').toLowerCase()).filter(Boolean));
+  const phones = new Set((existing || []).map((c: any) => (c.phone || '').replace(/\D/g, '')).filter((p: string) => p.length >= 7));
+
+  let imported = 0, skipped = 0;
+  for (let r = 1; r < rows.length; r++) {
+    const rec: any = {}; const extras: string[] = [];
+    rows[r].forEach((val, i) => {
+      const v = (val || '').trim(); if (!v) return;
+      const f = headers[i];
+      if (f && !rec[f]) rec[f] = v;
+      else if (!f) extras.push(`${(rows[0][i] || 'Field').trim()}: ${v}`);
+    });
+    const email = (rec.email || '').toLowerCase();
+    const phoneDigits = (rec.phone || '').replace(/\D/g, '');
+    if (!rec.name && !email && !phoneDigits) { skipped++; continue; }
+    if ((email && emails.has(email)) || (phoneDigits.length >= 7 && phones.has(phoneDigits))) { skipped++; continue; }
+    if (email) emails.add(email);
+    if (phoneDigits.length >= 7) phones.add(phoneDigits);
+    const { data: contact, error: cErr } = await supabase.from('contacts').insert({
+      name: rec.name || 'Sheet Lead', email: rec.email || null, phone: rec.phone || null,
+      city: rec.city || null, state: rec.state || null, address: rec.address || null,
+      notes: ['Imported from Google Sheets', extras.join('\n')].filter(Boolean).join('\n') || null,
+      created_by: userId,
+    }).select().single();
+    if (cErr) { skipped++; continue; }
+    await supabase.from('leads').insert({
+      contact_id: contact.id, status: 'Warm', source: rec.source || 'Google Sheets',
+      buyer_purpose: 'Self Use', pattern: 'Call', budget: rec.budget || null,
+      location_looking: rec.location_looking || null, created_by: userId,
+    });
+    imported++;
+  }
+  return { imported, skipped, total: rows.length - 1 };
+}
+
+app.post('/api/integrations/google-sheet/fetch', auth, async (req: any, res) => {
+  try {
+    const { role } = await getRoleForUser(req.userId);
+    if (role === 'employee') return res.status(403).json({ error: 'Only admins can import leads' });
+    const { data: integ } = await supabase.from('integrations').select('*').eq('user_id', req.userId).eq('platform', 'google').single();
+    const url = req.body?.sheet_url || integ?.config?.sheet_url;
+    if (!url) return res.status(400).json({ error: 'Add and save your Google Sheet URL first.' });
+    const result = await importFromSheet(req.userId, url);
+    await supabase.from('webhook_logs').insert({ platform: 'google', user_id: req.userId, status: 'processed', payload: result, lead_id: null });
+    res.json({ message: `Imported ${result.imported} new lead${result.imported !== 1 ? 's' : ''}, skipped ${result.skipped} duplicate${result.skipped !== 1 ? 's' : ''}.`, ...result });
+  } catch (err: any) {
+    await supabase.from('webhook_logs').insert({ platform: 'google', user_id: req.userId, status: 'error', error: err.message });
+    res.status(400).json({ error: err.message || 'Import failed' });
+  }
+});
+
+// Vercel Cron hits this to auto-sync every enabled sheet (no user session)
+app.get('/api/cron/sheet-sync', async (req: any, res) => {
+  if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.sendStatus(401);
+  try {
+    const { data: integs } = await supabase.from('integrations').select('*').eq('platform', 'google').eq('enabled', true);
+    const results: any[] = [];
+    for (const integ of integs || []) {
+      const url = integ.config?.sheet_url; if (!url) continue;
+      try {
+        const r = await importFromSheet(integ.user_id, url);
+        await supabase.from('webhook_logs').insert({ platform: 'google', user_id: integ.user_id, status: 'processed', payload: r });
+        results.push({ user: integ.user_id, ...r });
+      } catch (err: any) {
+        await supabase.from('webhook_logs').insert({ platform: 'google', user_id: integ.user_id, status: 'error', error: err.message });
+        results.push({ user: integ.user_id, error: err.message });
+      }
+    }
+    res.json({ synced: results.length, results });
   } catch (err: any) { res.status(500).json({ error: err.message || 'Server error' }); }
 });
 

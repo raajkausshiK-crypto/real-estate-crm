@@ -13,7 +13,7 @@ const NAV_ITEMS = [
   { to: '/import-export', label: 'Import / Export', icon: '📁', adminOnly: true },
   { to: '/employees', label: 'Employees', icon: '🧑‍💼', adminOnly: true },
   { to: '/calls', label: 'Calls', icon: '📞' },
-  { to: '/integrations', label: 'Ad Integrations', icon: '🔗', adminOnly: true },
+  { to: '/integrations', label: 'Sheet Import', icon: '📥', adminOnly: true },
 ];
 
 export default function Layout() {
